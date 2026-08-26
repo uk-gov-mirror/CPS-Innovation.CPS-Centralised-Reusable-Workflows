@@ -104,6 +104,9 @@ jobs:
 
           echo "Building: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
+          # Create temp storage directories
+          mkdir -p /tmp/buildah-storage /tmp/buildah-run
+
           # Build to OCI archive (works in unprivileged ACA containers)
           buildah --storage-driver=vfs \
             --root=/tmp/buildah-storage \
