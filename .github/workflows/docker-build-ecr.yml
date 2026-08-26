@@ -1,0 +1,161 @@
+name: "Reusable: Build and Push to ECR (Buildah)"
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: 'Image name (without registry prefix)'
+        required: true
+        type: string
+      dockerfile:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      context:
+        description: 'Build context path'
+        required: false
+        type: string
+        default: '.'
+      image_tag:
+        description: 'Image tag (default: github.run_id)'
+        required: false
+        type: string
+        default: ''
+      ecr_registry:
+        description: 'ECR registry URL (e.g., 123456789012.dkr.ecr.eu-west-2.amazonaws.com)'
+        required: true
+        type: string
+      aws_region:
+        description: 'AWS region for ECR'
+        required: true
+        type: string
+      environment:
+        description: 'GitHub environment for secrets'
+        required: false
+        type: string
+        default: 'non-prod'
+      runner_label:
+        description: 'Runner label to use (e.g., cps-cent-runner-nonprod-docker)'
+        required: true
+        type: string
+    secrets:
+      AWS_ROLE_ARN:
+        description: 'AWS IAM Role ARN for OIDC authentication'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ${{ inputs.runner_label }}
+    environment: ${{ inputs.environment || 'non-prod' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Verify Build Tools
+        run: |
+          echo "========================================="
+          echo "        BUILD & PUSH TO AWS ECR"
+          echo "========================================="
+          echo "Runner Label: ${{ inputs.runner_label }}"
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Image: ${{ inputs.image_name }}"
+          echo "ECR Registry: ${{ inputs.ecr_registry }}"
+          echo "Dockerfile: ${{ inputs.dockerfile }}"
+          echo "Context: ${{ inputs.context }}"
+          echo ""
+          echo "--- Tool Versions ---"
+          buildah --version
+          skopeo --version
+          aws --version
+          echo "========================================="
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Get ECR Credentials
+        id: ecr
+        run: |
+          ECR_REGISTRY="${{ inputs.ecr_registry }}"
+          AWS_REGION="${{ inputs.aws_region }}"
+
+          # Get ECR login password
+          ECR_PASSWORD=$(aws ecr get-login-password --region $AWS_REGION)
+          echo "::add-mask::$ECR_PASSWORD"
+          echo "password=$ECR_PASSWORD" >> $GITHUB_OUTPUT
+          echo "registry=$ECR_REGISTRY" >> $GITHUB_OUTPUT
+
+      - name: Build Image with Buildah
+        id: build
+        run: |
+          IMAGE_NAME="${{ inputs.image_name }}"
+          IMAGE_TAG="${{ inputs.image_tag || github.run_id }}"
+          DOCKERFILE="${{ inputs.dockerfile }}"
+          CONTEXT="${{ inputs.context }}"
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+
+          echo "Building: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          # Build to OCI archive (works in unprivileged ACA containers)
+          buildah --storage-driver=vfs bud \
+            --format=oci \
+            --isolation=chroot \
+            -t oci-archive:/tmp/image.tar:${IMAGE_NAME}:${IMAGE_TAG} \
+            -f ${DOCKERFILE} \
+            ${CONTEXT}
+
+          echo "Build complete!"
+          echo "archive=/tmp/image.tar" >> $GITHUB_OUTPUT
+
+      - name: Push Image with Skopeo
+        run: |
+          IMAGE_NAME="${{ inputs.image_name }}"
+          IMAGE_TAG="${{ inputs.image_tag || github.run_id }}"
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          PASSWORD="${{ steps.ecr.outputs.password }}"
+          ARCHIVE="${{ steps.build.outputs.archive }}"
+
+          echo "Pushing: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          skopeo copy \
+            --dest-creds="AWS:${PASSWORD}" \
+            oci-archive:${ARCHIVE}:${IMAGE_NAME}:${IMAGE_TAG} \
+            docker://${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+
+          echo "Pushing: ${REGISTRY}/${IMAGE_NAME}:latest"
+          skopeo copy \
+            --dest-creds="AWS:${PASSWORD}" \
+            oci-archive:${ARCHIVE}:${IMAGE_NAME}:${IMAGE_TAG} \
+            docker://${REGISTRY}/${IMAGE_NAME}:latest
+
+      - name: Verify Image in ECR
+        run: |
+          aws ecr describe-images \
+            --repository-name ${{ inputs.image_name }} \
+            --query 'imageDetails[*].{Tags:imageTags,Pushed:imagePushedAt}' \
+            --output table \
+            --region ${{ inputs.aws_region }} || echo "Could not verify image"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/image.tar
+
+      - name: Summary
+        run: |
+          echo "========================================="
+          echo "        BUILD & PUSH COMPLETE (ECR)"
+          echo "========================================="
+          echo "Registry: ${{ steps.ecr.outputs.registry }}"
+          echo "Image:    ${{ inputs.image_name }}"
+          echo "Tags:     ${{ inputs.image_tag || github.run_id }}, latest"
+          echo ""
+          echo "Pull command:"
+          echo "  docker pull ${{ steps.ecr.outputs.registry }}/${{ inputs.image_name }}:${{ inputs.image_tag || github.run_id }}"
+          echo "========================================="

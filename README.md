@@ -7,6 +7,8 @@ Centralized repository for GitHub Actions reusable workflows used across CPS-Inn
 | Workflow | Description |
 |----------|-------------|
 | [dotnet-build.yml](.github/workflows/dotnet-build.yml) | Build, test, and package .NET applications |
+| [docker-build-acr.yml](.github/workflows/docker-build-acr.yml) | Build and push container images to Azure Container Registry |
+| [docker-build-ecr.yml](.github/workflows/docker-build-ecr.yml) | Build and push container images to AWS Elastic Container Registry |
 | [terraform-plan.yml](.github/workflows/terraform-plan.yml) | Terraform plan with change detection |
 | [terraform-apply.yml](.github/workflows/terraform-apply.yml) | Terraform apply with approval gates |
 | [terraform-destroy.yml](.github/workflows/terraform-destroy.yml) | Terraform destroy with approval gates |
@@ -52,6 +54,48 @@ jobs:
       run-tests: true
       timeout: 15
     secrets: inherit
+```
+
+---
+
+## Docker Build Workflows
+
+Build container images with Buildah and push to ACR or ECR using reusable workflows.
+
+- Full guide: [docs/docker-build.md](docs/docker-build.md)
+- Example workflows:
+  - [examples/docker-build-acr.yml](examples/docker-build-acr.yml)
+  - [examples/docker-build-ecr.yml](examples/docker-build-ecr.yml)
+
+### Quick Usage (ACR)
+
+```yaml
+jobs:
+  docker-build:
+    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr.yml@v1.3
+    with:
+      image_name: 'my-app'
+      acr_name: 'myacrregistry'
+      runner_label: 'cps-cent-runner-nonprod-docker'
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+### Quick Usage (ECR)
+
+```yaml
+jobs:
+  docker-build:
+    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-ecr.yml@v1.3
+    with:
+      image_name: 'my-app'
+      ecr_registry: '123456789012.dkr.ecr.eu-west-2.amazonaws.com'
+      aws_region: 'eu-west-2'
+      runner_label: 'cps-cent-runner-nonprod-docker'
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
 ```
 
 ---
