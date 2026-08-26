@@ -103,17 +103,20 @@ jobs:
           REGISTRY="${{ steps.ecr.outputs.registry }}"
 
           echo "Building: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Buildah version: $(buildah --version)"
 
           # Create temp storage directories
           mkdir -p /tmp/buildah-storage /tmp/buildah-run
 
-          # Build to OCI archive (works in unprivileged ACA containers)
-          buildah --storage-driver=vfs \
+          # Build to OCI archive
+          buildah \
+            --storage-driver=vfs \
             --root=/tmp/buildah-storage \
             --runroot=/tmp/buildah-run \
-            bud \
-            --format=oci \
+            build \
             --isolation=chroot \
+            --format=oci \
+            --layers=false \
             -t oci-archive:/tmp/image.tar:${IMAGE_NAME}:${IMAGE_TAG} \
             -f ${DOCKERFILE} \
             ${CONTEXT}
