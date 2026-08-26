@@ -15,6 +15,10 @@ on:
         type: choice
         default: 'cps-cent-runner-nonprod'
 
+permissions:
+  id-token: write
+  contents: read
+
 
 # Reusable workflow for teams to build container images and push to AWS Elastic Container Registry
 # Uses Buildah/Skopeo - no Docker daemon needed (works in ACA without privileged mode)

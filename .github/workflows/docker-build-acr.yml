@@ -103,7 +103,10 @@ jobs:
           echo "Building: ${SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
 
           # Build to OCI archive (works in unprivileged containers)
-          buildah --storage-driver=vfs bud \
+          buildah --storage-driver=vfs \
+            --root=/tmp/buildah-storage \
+            --runroot=/tmp/buildah-run \
+            bud \
             --format=oci \
             --isolation=chroot \
             -t oci-archive:/tmp/image.tar:${IMAGE_NAME}:${IMAGE_TAG} \

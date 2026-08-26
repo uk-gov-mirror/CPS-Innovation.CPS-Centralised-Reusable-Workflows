@@ -15,6 +15,10 @@ on:
         type: choice
         default: 'cps-cent-runner-nonprod'
 
+permissions:
+  id-token: write
+  contents: read
+
 
 jobs:
   build:

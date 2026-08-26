@@ -70,6 +70,10 @@ Build container images with Buildah and push to ACR or ECR using reusable workfl
 ### Quick Usage (ACR)
 
 ```yaml
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   docker-build:
     uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr.yml@v1.3
@@ -86,6 +90,10 @@ jobs:
 ### Quick Usage (ECR)
 
 ```yaml
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   docker-build:
     uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-ecr.yml@v1.3
