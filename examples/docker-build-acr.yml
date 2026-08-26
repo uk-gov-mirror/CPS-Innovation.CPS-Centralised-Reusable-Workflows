@@ -1,0 +1,31 @@
+# Reusable workflow for teams to build container images and push to Azure Container Registry
+# Uses Buildah/Skopeo - no Docker daemon needed (works in ACA without privileged mode)
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner to use'
+        type: choice
+        default: 'cps-cent-runner-nonprod'
+
+
+jobs:
+  build:
+    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr.yml@v1.3
+    with:
+      image_name: 'my-app'
+      acr_name: 'myacrregistry'
+      runner_label: 'cps-cent-runner-nonprod-docker'
+      dockerfile: 'Dockerfile'
+      context: '.'
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}

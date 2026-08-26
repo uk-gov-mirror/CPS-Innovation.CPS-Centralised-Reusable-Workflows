@@ -1,0 +1,34 @@
+# Reusable workflow for teams to build container images and push to Azure Container Registry
+# Uses Buildah/Skopeo - no Docker daemon needed (works in ACA without privileged mode)
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner to use'
+        type: choice
+        default: 'cps-cent-runner-nonprod'
+
+
+# Reusable workflow for teams to build container images and push to AWS Elastic Container Registry
+# Uses Buildah/Skopeo - no Docker daemon needed (works in ACA without privileged mode)
+#
+
+jobs:
+  build:
+    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-ecr.yml@v1.3
+    with:
+      image_name: 'my-app'
+      ecr_registry: '123456789012.dkr.ecr.eu-west-2.amazonaws.com'
+      runner_label: 'cps-cent-runner-nonprod-docker'
+      aws_region: 'eu-west-2'
+      dockerfile: 'Dockerfile'
+      context: '.'
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}

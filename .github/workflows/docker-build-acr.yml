@@ -1,0 +1,165 @@
+name: "Reusable: Build and Push to ACR (Buildah)"
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: 'Image name (without registry prefix)'
+        required: true
+        type: string
+      dockerfile:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      context:
+        description: 'Build context path'
+        required: false
+        type: string
+        default: '.'
+      image_tag:
+        description: 'Image tag (default: github.run_id)'
+        required: false
+        type: string
+        default: ''
+      acr_name:
+        description: 'Azure Container Registry name (without .azurecr.io suffix)'
+        required: true
+        type: string
+      environment:
+        description: 'GitHub environment for secrets'
+        required: false
+        type: string
+        default: 'non-prod'
+      runner_label:
+        description: 'Runner label to use (e.g., cps-cent-runner-nonprod-docker)'
+        required: true
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ${{ inputs.runner_label }}
+    environment: ${{ inputs.environment || 'non-prod' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Verify Build Tools
+        run: |
+          echo "========================================="
+          echo "        BUILD ENVIRONMENT INFO"
+          echo "========================================="
+          echo "Runner Label: ${{ inputs.runner_label }}"
+          echo "Runner Name: $RUNNER_NAME"
+          echo "Image: ${{ inputs.image_name }}"
+          echo "ACR: ${{ inputs.acr_name }}.azurecr.io"
+          echo "Dockerfile: ${{ inputs.dockerfile }}"
+          echo "Context: ${{ inputs.context }}"
+          echo ""
+          echo "--- Tool Versions ---"
+          buildah --version || echo "Buildah not available"
+          skopeo --version || echo "Skopeo not available"
+          echo "========================================="
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get ACR Credentials
+        id: acr
+        run: |
+          ACR_NAME="${{ inputs.acr_name }}"
+          echo "Using ACR: ${ACR_NAME}"
+          TOKEN=$(az acr login --name $ACR_NAME --expose-token --output tsv --query accessToken)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "server=${ACR_NAME}.azurecr.io" >> $GITHUB_OUTPUT
+          echo "name=${ACR_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Build Image with Buildah
+        id: build
+        run: |
+          IMAGE_NAME="${{ inputs.image_name }}"
+          IMAGE_TAG="${{ inputs.image_tag || github.run_id }}"
+          DOCKERFILE="${{ inputs.dockerfile }}"
+          CONTEXT="${{ inputs.context }}"
+          SERVER="${{ steps.acr.outputs.server }}"
+
+          echo "Building: ${SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          # Build to OCI archive (works in unprivileged containers)
+          buildah --storage-driver=vfs bud \
+            --format=oci \
+            --isolation=chroot \
+            -t oci-archive:/tmp/image.tar:${IMAGE_NAME}:${IMAGE_TAG} \
+            -f ${DOCKERFILE} \
+            ${CONTEXT}
+
+          echo "Build complete!"
+          echo "archive=/tmp/image.tar" >> $GITHUB_OUTPUT
+
+      - name: Push Image with Skopeo
+        run: |
+          IMAGE_NAME="${{ inputs.image_name }}"
+          IMAGE_TAG="${{ inputs.image_tag || github.run_id }}"
+          SERVER="${{ steps.acr.outputs.server }}"
+          TOKEN="${{ steps.acr.outputs.token }}"
+          ARCHIVE="${{ steps.build.outputs.archive }}"
+
+          echo "Pushing: ${SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          # Push with tag
+          skopeo copy \
+            --dest-creds="00000000-0000-0000-0000-000000000000:${TOKEN}" \
+            oci-archive:${ARCHIVE}:${IMAGE_NAME}:${IMAGE_TAG} \
+            docker://${SERVER}/${IMAGE_NAME}:${IMAGE_TAG}
+
+          # Also push as latest
+          echo "Pushing: ${SERVER}/${IMAGE_NAME}:latest"
+          skopeo copy \
+            --dest-creds="00000000-0000-0000-0000-000000000000:${TOKEN}" \
+            oci-archive:${ARCHIVE}:${IMAGE_NAME}:${IMAGE_TAG} \
+            docker://${SERVER}/${IMAGE_NAME}:latest
+
+          echo "Push complete!"
+
+      - name: Verify Image in Registry
+        run: |
+          az acr repository show-tags \
+            --name ${{ steps.acr.outputs.name }} \
+            --repository ${{ inputs.image_name }} \
+            --top 5 \
+            --orderby time_desc \
+            --output table
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/image.tar
+
+      - name: Build Summary
+        run: |
+          echo "========================================="
+          echo "        BUILD & PUSH COMPLETE"
+          echo "========================================="
+          echo "Registry: ${{ steps.acr.outputs.server }}"
+          echo "Image:    ${{ inputs.image_name }}"
+          echo "Tags:     ${{ inputs.image_tag || github.run_id }}, latest"
+          echo ""
+          echo "Pull command:"
+          echo "  docker pull ${{ steps.acr.outputs.server }}/${{ inputs.image_name }}:${{ inputs.image_tag || github.run_id }}"
+          echo "========================================="
