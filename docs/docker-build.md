@@ -16,6 +16,18 @@ Use these workflows to build container images with Buildah and push to either Az
 - Standardized build and push across CPS repositories
 - OIDC-based auth for Azure and AWS (no long-lived passwords)
 
+## Required Caller Permissions
+
+When calling either reusable workflow, the caller workflow must allow OIDC token issuance:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+```
+
+If this is missing, GitHub will fail validation with an error similar to: requesting id-token write, but only allowed id-token none.
+
 ## Common Inputs
 
 | Input | Required | Default | Description |
@@ -46,6 +58,10 @@ Use these workflows to build container images with Buildah and push to either Az
 ### Usage Example
 
 ```yaml
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   docker-build:
     uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr.yml@v1.3
@@ -81,6 +97,10 @@ jobs:
 ### Usage Example
 
 ```yaml
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   docker-build:
     uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-ecr.yml@v1.3
