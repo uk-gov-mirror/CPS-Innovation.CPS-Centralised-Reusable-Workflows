@@ -1,0 +1,143 @@
+name: Build in ACR and Push to ECR (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner to use'
+        type: string
+        default: 'cps-cent-runner-nonprod'
+      # ACR inputs
+      acr-name:
+        description: 'Azure Container Registry name (without .azurecr.io)'
+        type: string
+        required: true
+      acr-image-name:
+        description: 'Image repository name in ACR'
+        type: string
+        required: true
+      image-tag:
+        description: 'Image tag (e.g. v1.0.0 or commit sha). Applied to both ACR and ECR unless ecr-image-tag is set.'
+        type: string
+        default: 'latest'
+      dockerfile-path:
+        description: 'Path to Dockerfile (relative to build context)'
+        type: string
+        default: 'Dockerfile'
+      build-context:
+        description: 'Docker build context path'
+        type: string
+        default: '.'
+      # ECR inputs
+      aws-region:
+        description: 'AWS region for ECR'
+        type: string
+        required: true
+      ecr-registry:
+        description: 'ECR registry hostname (e.g. 123456789012.dkr.ecr.eu-west-2.amazonaws.com)'
+        type: string
+        required: true
+      ecr-image-name:
+        description: 'Image repository name in ECR'
+        type: string
+        required: true
+      ecr-image-tag:
+        description: 'Optional ECR-specific tag. Defaults to image-tag if not set.'
+        type: string
+        default: ''
+      # Tooling
+      crane-version:
+        description: 'Version of google/go-containerregistry crane to install'
+        type: string
+        default: 'v0.19.1'
+      timeout:
+        description: 'Job timeout in minutes'
+        type: number
+        default: 30
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      AWS_ROLE_ARN:
+        required: true
+
+jobs:
+  build-and-push:
+    name: 'Build ACR & Push ECR'
+    runs-on: [self-hosted, "${{ inputs.runner }}"]
+    timeout-minutes: ${{ inputs.timeout }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      ACR_NAME: ${{ inputs.acr-name }}
+      ACR_IMAGE_NAME: ${{ inputs.acr-image-name }}
+      IMAGE_TAG: ${{ inputs.image-tag }}
+      DOCKERFILE_PATH: ${{ inputs.dockerfile-path }}
+      BUILD_CONTEXT: ${{ inputs.build-context }}
+      AWS_REGION: ${{ inputs.aws-region }}
+      ECR_REGISTRY: ${{ inputs.ecr-registry }}
+      ECR_IMAGE_NAME: ${{ inputs.ecr-image-name }}
+      ECR_IMAGE_TAG: ${{ inputs.ecr-image-tag != '' && inputs.ecr-image-tag || inputs.image-tag }}
+      CRANE_VERSION: ${{ inputs.crane-version }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image in ACR
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "$ACR_IMAGE_NAME:$IMAGE_TAG" \
+            --file "$DOCKERFILE_PATH" \
+            "$BUILD_CONTEXT"
+
+      - name: Install crane
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            | tar -xz -C "$HOME/bin" crane
+          chmod +x "$HOME/bin/crane"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/crane" version
+
+      - name: Authenticate crane to ACR
+        run: |
+          ACR_TOKEN=$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)
+          echo "$ACR_TOKEN" | crane auth login "$ACR_NAME.azurecr.io" \
+            --username 00000000-0000-0000-0000-000000000000 --password-stdin
+
+      - name: AWS Login (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authenticate crane to ECR
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | crane auth login "$ECR_REGISTRY" --username AWS --password-stdin
+
+      - name: Copy image ACR -> ECR
+        run: |
+          crane copy \
+            "$ACR_NAME.azurecr.io/$ACR_IMAGE_NAME:$IMAGE_TAG" \
+            "$ECR_REGISTRY/$ECR_IMAGE_NAME:$ECR_IMAGE_TAG"
+
+      - name: Verify image in ECR
+        run: |
+          crane digest "$ECR_REGISTRY/$ECR_IMAGE_NAME:$ECR_IMAGE_TAG"
