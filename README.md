@@ -7,8 +7,7 @@ Centralized repository for GitHub Actions reusable workflows used across CPS-Inn
 | Workflow | Description |
 |----------|-------------|
 | [dotnet-build.yml](.github/workflows/dotnet-build.yml) | Build, test, and package .NET applications |
-| [docker-build-acr.yml](.github/workflows/docker-build-acr.yml) | Build and push container images to Azure Container Registry |
-| [docker-build-ecr.yml](.github/workflows/docker-build-ecr.yml) | Build and push container images to AWS Elastic Container Registry |
+| [docker-build-acr-to-ecr.yml](.github/workflows/docker-build-acr-to-ecr.yml) | Build image in ACR and push it to ECR |
 | [terraform-plan.yml](.github/workflows/terraform-plan.yml) | Terraform plan with change detection |
 | [terraform-apply.yml](.github/workflows/terraform-apply.yml) | Terraform apply with approval gates |
 | [terraform-destroy.yml](.github/workflows/terraform-destroy.yml) | Terraform destroy with approval gates |
@@ -58,16 +57,19 @@ jobs:
 
 ---
 
-## Docker Build Workflows
+## Docker Build Workflows (Removed — Did Not Work)
 
-Build container images with Buildah and push to ACR or ECR using reusable workflows.
+The ACR/ECR Buildah-based docker build reusable workflows were attempted and removed because they did not work. See [docs/docker-build.md](docs/docker-build.md) for the log of what was tried.
 
-- Full guide: [docs/docker-build.md](docs/docker-build.md)
-- Example workflows:
-  - [examples/docker-build-acr.yml](examples/docker-build-acr.yml)
-  - [examples/docker-build-ecr.yml](examples/docker-build-ecr.yml)
+---
 
-### Quick Usage (ACR)
+## Build in ACR and Push to ECR Workflow
+
+Builds an image using `az acr build` and copies it to ECR with `crane`, avoiding the need for a local Docker daemon.
+
+- Example workflow: [examples/docker-build-acr-to-ecr.yml](examples/docker-build-acr-to-ecr.yml)
+
+### Usage
 
 ```yaml
 permissions:
@@ -75,36 +77,47 @@ permissions:
   contents: read
 
 jobs:
-  docker-build:
-    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr.yml@v1.3
+  docker-build-acr-to-ecr:
+    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr-to-ecr.yml@v1
     with:
-      image_name: 'my-app'
-      acr_name: 'myacrregistry'
-      runner_label: 'cps-cent-runner-nonprod-docker'
+      acr-name: 'myacrregistry'
+      acr-image-name: 'my-app'
+      image-tag: ${{ github.sha }}
+      aws-region: 'eu-west-2'
+      ecr-registry: '123456789012.dkr.ecr.eu-west-2.amazonaws.com'
+      ecr-image-name: 'my-app'
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-```
-
-### Quick Usage (ECR)
-
-```yaml
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  docker-build:
-    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-ecr.yml@v1.3
-    with:
-      image_name: 'my-app'
-      ecr_registry: '123456789012.dkr.ecr.eu-west-2.amazonaws.com'
-      aws_region: 'eu-west-2'
-      runner_label: 'cps-cent-runner-nonprod-docker'
-    secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
 ```
+
+### Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `runner` | No | `cps-cent-runner-nonprod` | Runner to use |
+| `acr-name` | **Yes** | - | ACR name without `.azurecr.io` |
+| `acr-image-name` | **Yes** | - | Image repository name in ACR |
+| `image-tag` | No | `latest` | Tag applied to both ACR and ECR unless `ecr-image-tag` is set |
+| `dockerfile-path` | No | `Dockerfile` | Path to Dockerfile |
+| `build-context` | No | `.` | Docker build context path |
+| `aws-region` | **Yes** | - | AWS region for ECR |
+| `ecr-registry` | **Yes** | - | ECR registry hostname |
+| `ecr-image-name` | **Yes** | - | Image repository name in ECR |
+| `ecr-image-tag` | No | - (falls back to `image-tag`) | Optional ECR-specific tag |
+| `crane-version` | No | `v0.19.1` | Version of `crane` to install |
+| `timeout` | No | `30` | Job timeout in minutes |
+
+### Secrets Required
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID` | Azure AD app client ID |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `AWS_ROLE_ARN` | IAM role ARN to assume via GitHub OIDC |
 
 ---
 

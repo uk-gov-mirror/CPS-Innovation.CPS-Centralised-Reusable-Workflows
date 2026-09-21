@@ -1,0 +1,27 @@
+name: Docker Build (ACR) and Push to ECR Example
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  docker-build-acr-to-ecr:
+    uses: CPS-Innovation/CPS-Centralised-Reusable-Workflows/.github/workflows/docker-build-acr-to-ecr.yml@v1
+    with:
+      acr-name: 'myacrregistry'
+      acr-image-name: 'my-app'
+      image-tag: ${{ github.sha }}
+      dockerfile-path: 'Dockerfile'
+      build-context: '.'
+      aws-region: 'eu-west-2'
+      ecr-registry: '123456789012.dkr.ecr.eu-west-2.amazonaws.com'
+      ecr-image-name: 'my-app'
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
